@@ -13,233 +13,351 @@ struct _DlgNPC_;
 #define o_dlgNPC ((_DlgNPC_*)0x28604D8)
 #define WoG_NoNPC (*(_int_*)0x277192C)
 
+namespace NpcSkillsScrolling
+{
+    enum { MAX_SKILLS = 15, PRIMARY_SKILLS = 6, VISIBLE_SKILLS = 6, LEFT_BUTTON = 220, RIGHT_BUTTON = 221 };
+
+    struct State
+    {
+        unsigned char frames[MAX_SKILLS];
+        int count;
+        int first;
+    };
+
+    const unsigned char textRows[MAX_SKILLS] = {1, 2, 3, 4, 5, 8, 9, 10, 11, 15, 16, 17, 22, 23, 29};
+
+    void Collect(State& state, const _Npc_* npc)
+    {
+        state.count = 0;
+        state.first = 0;
+        int previewBegin = MAX_SKILLS;
+        int skillId = 0;
+        _dword_ mask = 1;
+        // All 15 pairs of the six commander skills, in DEF order.
+        // Collect learned frames at the front and preview frames at the back.
+        for (int firstSkill = 0; firstSkill < PRIMARY_SKILLS - 1; ++firstSkill)
+        {
+            for (int secondSkill = firstSkill + 1; secondSkill < PRIMARY_SKILLS;
+                ++secondSkill, ++skillId, mask <<= 1)
+            {
+                if (npc->specBon[0] & mask)
+                    state.frames[state.count++] = static_cast<unsigned char>(2 * skillId + 1);
+                else if (!(npc->specBon[1] & mask) &&
+                    npc->secondary_skills[firstSkill] && npc->secondary_skills[secondSkill])
+                    state.frames[--previewBegin] = static_cast<unsigned char>(2 * skillId + 2);
+            }
+        }
+        // Restore preview order and close the gap; memmove handles overlap.
+        const int previewCount = MAX_SKILLS - previewBegin;
+        std::reverse(state.frames + previewBegin, state.frames + MAX_SKILLS);
+        memmove(state.frames + state.count, state.frames + previewBegin,
+            previewCount * sizeof(state.frames[0]));
+        state.count += previewCount;
+    }
+
+    void Update(_CustomDlg_* dlg, _DlgNPC_* dlgNPC, const State& state)
+    {
+        for (int i = 0; i < VISIBLE_SKILLS; ++i)
+        {
+            const int frame = state.frames[state.first + i];
+            const int row = textRows[(frame - 1) / 2];
+            dlgNPC->SpecBonus[i] = (char*)frame;
+            dlgNPC->SpecBonusHints[i] = Get_ITxt(28 + row, (frame & 1) ? 1 : 2);
+            dlgNPC->SpecBonusPopUpText[i] = Get_ITxt(64 + row, 1);
+            ((_DlgStaticDef_*)dlg->GetItem(60 + i))->def_frame_index = frame;
+        }
+        dlg->GetItem(LEFT_BUTTON)->SetEnabled(state.first > 0);
+        dlg->GetItem(RIGHT_BUTTON)->SetEnabled(state.first + VISIBLE_SKILLS < state.count);
+    }
+
+    bool Scroll(_CustomDlg_* dlg, _DlgNPC_* dlgNPC, int direction)
+    {
+        State* state = (State*)dlg->custom_data[0];
+        if (!state || state->count <= VISIBLE_SKILLS)
+            return false;
+        const int first = state->first + direction;
+        if (first < 0 || first > state->count - VISIBLE_SKILLS)
+            return false;
+        state->first = first;
+        Update(dlg, dlgNPC, *state);
+        dlg->Redraw(TRUE);
+        return true;
+    }
+}
+
+static char* NPC_GetHint(_DlgNPC_* dlgNPC, int itemId)
+{
+    char* text = o_NullString;
+    switch (itemId)
+    {
+        case 3:
+            text = txtresWOG->GetString(53);
+            break; // подсказка Уволить командира
+
+        case 6:
+            text = dlgNPC->PortraitHint;
+            break; // портрет командира
+
+        case 11:
+            text = txtresWOG->GetString(74);
+            break; // подсказка имя командира
+
+        case 13:
+            sprintf(o_TextBuffer, "%s %d", txtresWOG->GetString(67), dlgNPC->Level);
+            text = o_TextBuffer;
+            break; // подсказка уровень командира
+
+        case 15:
+            text = dlgNPC->TypeHint;
+            break; // подсказка класса командира
+
+        case 17:
+            sprintf(o_TextBuffer, "%s %s", txtresWOG->GetString(68), dlgNPC->HeroName);
+            text = o_TextBuffer;
+            break; // подсказка имя героя хозяина
+
+        case 19:
+            sprintf(o_TextBuffer, "%s %d", txtresWOG->GetString(71), dlgNPC->CurExp);
+            text = o_TextBuffer;
+            break; // подсказка текущий опыт
+
+        case 21: sprintf(o_TextBuffer, "%s %d", txtresWOG->GetString(72), dlgNPC->NextExp);
+            text = o_TextBuffer;    break; // подсказка следующий опыт
+
+        case 22:    text = txtresWOG->GetString(77); break; // подсказка навыки класса
+        case 23:    text = txtresWOG->GetString(78); break; // подсказка артефакты
+        case 24:    text = txtresWOG->GetString(69); break; // подсказка основные навыки
+        case 25:    text = txtresWOG->GetString(70); break; // подсказка вторичные навыки
+
+        case 31:
+            sprintf(o_TextBuffer, "%s %d (%d)", txtresWOG->GetString(54), dlgNPC->pAT, dlgNPC->hAT);
+            text = o_TextBuffer;
+            break; // подсказка атака
+
+        case 33:
+            sprintf(o_TextBuffer, "%s %d (%d)", txtresWOG->GetString(55), dlgNPC->pDF, dlgNPC->hDF);
+            text = o_TextBuffer;
+            break; // подсказка защита
+
+        case 35:
+            sprintf(o_TextBuffer, "%s %d", txtresWOG->GetString(56), dlgNPC->pHP);
+            text = o_TextBuffer;
+            break; // подсказка здоровье
+
+        case 37:
+            sprintf(o_TextBuffer, "%s %d - %d", txtresWOG->GetString(58), dlgNPC->pDML, dlgNPC->pDMH);
+            text = o_TextBuffer;
+            break; // подсказка урон
+
+        case 39:
+            sprintf(o_TextBuffer, "%s %d", txtresWOG->GetString(59), dlgNPC->pMP);
+            text = o_TextBuffer;
+            break; // подсказка сила магии
+
+        case 41:
+            sprintf(o_TextBuffer, "%s %d%%", txtresWOG->GetString(60), dlgNPC->pMR);
+            text = o_TextBuffer;
+            break; // подсказка сопротивление
+
+        case 43:
+            sprintf(o_TextBuffer, "%s %d", txtresWOG->GetString(61), dlgNPC->pShots);
+            text = o_TextBuffer;
+            break; // подсказка боезапас
+
+        case 45:
+            sprintf(o_TextBuffer, "%s %d", txtresWOG->GetString(57), dlgNPC->pSP);
+            text = o_TextBuffer;
+            break; // подсказка скорость
+
+        case 46:
+            text = dlgNPC->SpecHint1;
+            break;  // подсказка спец навык класса 1
+
+        case 47:
+            text = dlgNPC->SpecHint2;
+            break;  // подсказка спец навык класса 2
+
+        case 48: case 49: case 50: case 51: case 52: case 53:
+            text = dlgNPC->ArtHints[itemId -48];
+            break; // подсказка артефакты[48-53]
+
+        case 54: case 55: case 56: case 57: case 58: case 59:
+            text = dlgNPC->BonusHints[itemId -54];
+            break; // подсказка основные навыки[54-59]
+
+        case 60: case 61: case 62: case 63: case 64: case 65:
+            text = dlgNPC->SpecBonusHints[itemId -60];
+            break; // подсказка доп. навыки[60-65]
+
+        case 67: case 68: case 69: case 70: case 71: case 72:
+            text = dlgNPC->NextHints[itemId -67];
+            break; // подсказка изучаемые. навыки[66-72]
+
+        case DIID_OK:
+            text = dlgNPC->Request ? json_Npc[2] : json_Npc[1];
+            break; // подсказка Ok
+
+        default:
+            text = o_NullString;    break;
+    }
+    return text;
+}
+
+static void NPC_ShowPopup(_DlgNPC_* dlgNPC, int itemId)
+{
+    switch (itemId)
+    {
+        case 3:
+            b_MsgBox(json_Npc[3], MBX_RMC);
+            break;  // уволить командира
+
+        case 6: case 11:
+            b_MsgBox(dlgNPC->Description, MBX_RMC);
+            break; // биография
+
+        case 15:
+            b_MsgBox(dlgNPC->TypePopUpText, MBX_RMC);
+            break; // описание класса командира
+
+        case 46:
+            b_MsgBoxAndDef(npc1Def, (int)dlgNPC->SpecIcon1, dlgNPC->SpecPopUpText1);
+            break;      // спец навык класса 1
+
+        case 47:
+            b_MsgBoxAndDef(npc1Def, (int)dlgNPC->SpecIcon2, dlgNPC->SpecPopUpText2);
+            break;      // спец навык класса 2
+
+        case 48: case 49: case 50: case 51: case 52: case 53:  // артефакты[48-53]
+            b_MsgBoxD(dlgNPC->ArtPopUpTexts[itemId -48], MBX_RMC, 8, (int)dlgNPC->ArtIcons[itemId -48]);
+            break;
+
+        case 54: case 55: case 56: case 57: case 58: case 59:  // основные навыки[54-59]
+            b_MsgBoxAndDef(npc2Def, (int)dlgNPC->Bonus[itemId -54], dlgNPC->BonusPopUpText[itemId -54]);
+            break;
+
+        case 60: case 61: case 62: case 63: case 64: case 65:  // доп. навыки[60-65]
+            b_MsgBoxAndDef(npc3Def, (int)dlgNPC->SpecBonus[itemId -60], dlgNPC->SpecBonusPopUpText[itemId -60]);
+            break;
+
+        case 67: case 68: case 69: case 70: case 71: case 72:  // изучаемые. навыки[67-72]
+            b_MsgBoxAndDef(npc2Def, (int)dlgNPC->Next[itemId -67], dlgNPC->NextPopUpTexts[itemId -67]);
+            break;
+
+        default:
+            break;
+    }
+}
+
+// Return true only when the action should close the commander dialog.
+static bool NPC_OnLeftClick(_CustomDlg_* dlg, _DlgNPC_* dlgNPC, int itemId)
+{
+    switch (itemId)
+    {
+        case NpcSkillsScrolling::LEFT_BUTTON:
+            NpcSkillsScrolling::Scroll(dlg, dlgNPC, -1);
+            break;
+        case NpcSkillsScrolling::RIGHT_BUTTON:
+            NpcSkillsScrolling::Scroll(dlg, dlgNPC, 1);
+            break;
+        case 3:
+            b_MsgBox(txtresWOG->GetString(62), MBX_OKCANCEL);
+            if (o_WndMgr->result_dlg_item_id == DIID_OK)
+            {
+                dlgNPC->DlgLeft = -1;
+                return true;
+            }
+            break;
+        default:
+            break;
+    }
+    return false;
+}
+
+static bool NPC_OnLeftButtonDown(_CustomDlg_* dlg, _DlgNPC_* dlgNPC, int itemId)
+{
+    switch (itemId)
+    {
+        case 67: case 68: case 69: case 70: case 71: case 72:
+        {
+            if (dlgNPC->Request != 2)
+                break;
+            const int lastId = dlgNPC->DlgLeft;
+            const int thisId = itemId - 66;
+            if (lastId == thisId && o_GetTime() - time_click < 300)
+                return true;
+            ((_DlgStaticDef_*)dlg->GetItem(66 + lastId))->def_frame_index = (int)dlgNPC->Next[lastId - 1];
+            ((_DlgStaticDef_*)dlg->GetItem(itemId))->def_frame_index = (int)dlgNPC->NextActive[thisId - 1];
+            dlg->GetItem(itemId)->RedrawScreen();
+            dlgNPC->DlgLeft = thisId;
+            time_click = o_GetTime();
+            break;
+        }
+        case 48: case 49: case 50: case 51: case 52: case 53:
+        {
+            if (dlgNPC->Request != 0 || !(dlgNPC->Flags & 4))
+                break;
+            const int index = itemId - 48;
+            sprintf(o_TextBuffer, "%s\n\n%s", dlgNPC->ArtPopUpTexts[index], txtresWOG->GetString(79));
+            b_MsgBoxD(o_TextBuffer, MBX_OKCANCEL, 8, (int)dlgNPC->ArtIcons[index]);
+            if (o_WndMgr->result_dlg_item_id == DIID_OK)
+            {
+                dlgNPC->ArtOutput[index] = 1;
+                return true;
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    return false;
+}
+
 int __stdcall Y_New_CommanderDlg_Proc(_CustomDlg_* dlg, _EventMsg_* msg)
 {
-    int r = dlg->DefProc(msg);
-    _DlgNPC_* dlgNPC = o_dlgNPC; // воговская структура диалога
+    // DefProc also converts button hotkeys into the usual mouse-button events.
+    const int r = dlg->DefProc(msg);
+    _DlgNPC_* dlgNPC = o_dlgNPC;
 
-    if (msg->type == MT_MOUSEOVER) // ведение мыши
+    switch (msg->type)
     {
-        _DlgItem_* it = dlg->FindItem(msg->x_abs, msg->y_abs);
-        char* text = o_NullString;
-        if (it)
+        case MT_MOUSEOVER:
         {
-            int IDM = it->id;
-            switch (IDM)
+            _DlgItem_* item = dlg->FindItem(msg->x_abs, msg->y_abs);
+            if (item)
             {
-                case 3:
-                    text = txtresWOG->GetString(53);
-                    break; // подсказка Уволить командира
-
-                case 6:
-                    text = dlgNPC->PortraitHint;
-                    break; // портрет командира
-
-                case 11:
-                    text = txtresWOG->GetString(74);
-                    break; // подсказка имя командира
-
-                case 13:
-                    sprintf(o_TextBuffer, "%s %d", txtresWOG->GetString(67), dlgNPC->Level);
-                    text = o_TextBuffer;
-                    break; // подсказка уровень командира
-
-                case 15:
-                    text = dlgNPC->TypeHint;
-                    break; // подсказка класса командира
-
-                case 17:
-                    sprintf(o_TextBuffer, "%s %s", txtresWOG->GetString(68), dlgNPC->HeroName);
-                    text = o_TextBuffer;
-                    break; // подсказка имя героя хозяина
-
-                case 19:
-                    sprintf(o_TextBuffer, "%s %d", txtresWOG->GetString(71), dlgNPC->CurExp);
-                    text = o_TextBuffer;
-                    break; // подсказка текущий опыт
-
-                case 21: sprintf(o_TextBuffer, "%s %d", txtresWOG->GetString(72), dlgNPC->NextExp);
-                    text = o_TextBuffer;    break; // подсказка следующий опыт
-
-                case 22:    text = txtresWOG->GetString(77); break; // подсказка навыки класса
-                case 23:    text = txtresWOG->GetString(78); break; // подсказка артефакты
-                case 24:    text = txtresWOG->GetString(69); break; // подсказка основные навыки
-                case 25:    text = txtresWOG->GetString(70); break; // подсказка вторичные навыки
-
-                case 31:
-                    sprintf(o_TextBuffer, "%s %d (%d)", txtresWOG->GetString(54), dlgNPC->pAT, dlgNPC->hAT);
-                    text = o_TextBuffer;
-                    break; // подсказка атака
-
-                case 33:
-                    sprintf(o_TextBuffer, "%s %d (%d)", txtresWOG->GetString(55), dlgNPC->pDF, dlgNPC->hDF);
-                    text = o_TextBuffer;
-                    break; // подсказка защита
-
-                case 35:
-                    sprintf(o_TextBuffer, "%s %d", txtresWOG->GetString(56), dlgNPC->pHP);
-                    text = o_TextBuffer;
-                    break; // подсказка здоровье
-
-                case 37:
-                    sprintf(o_TextBuffer, "%s %d - %d", txtresWOG->GetString(58), dlgNPC->pDML, dlgNPC->pDMH);
-                    text = o_TextBuffer;
-                    break; // подсказка урон
-
-                case 39:
-                    sprintf(o_TextBuffer, "%s %d", txtresWOG->GetString(59), dlgNPC->pMP);
-                    text = o_TextBuffer;
-                    break; // подсказка сила магии
-
-                case 41:
-                    sprintf(o_TextBuffer, "%s %d%%", txtresWOG->GetString(60), dlgNPC->pMR);
-                    text = o_TextBuffer;
-                    break; // подсказка сопротивление
-
-                case 43:
-                    sprintf(o_TextBuffer, "%s %d", txtresWOG->GetString(61), dlgNPC->pShots);
-                    text = o_TextBuffer;
-                    break; // подсказка боезапас
-
-                case 45:
-                    sprintf(o_TextBuffer, "%s %d", txtresWOG->GetString(57), dlgNPC->pSP);
-                    text = o_TextBuffer;
-                    break; // подсказка скорость
-
-                case 46:
-                    text = dlgNPC->SpecHint1;
-                    break;  // подсказка спец навык класса 1
-
-                case 47:
-                    text = dlgNPC->SpecHint2;
-                    break;  // подсказка спец навык класса 2
-
-                case 48: case 49: case 50: case 51: case 52: case 53:
-                    text = dlgNPC->ArtHints[IDM -48];
-                    break; // подсказка артефакты[48-53]
-
-                case 54: case 55: case 56: case 57: case 58: case 59:
-                    text = dlgNPC->BonusHints[IDM -54];
-                    break; // подсказка основные навыки[54-59]
-
-                case 60: case 61: case 62: case 63: case 64: case 65:
-                    text = dlgNPC->SpecBonusHints[IDM -60];
-                    break; // подсказка доп. навыки[60-65]
-
-                case 67: case 68: case 69: case 70: case 71: case 72:
-                    text = dlgNPC->NextHints[IDM -67];
-                    break; // подсказка изучаемые. навыки[66-72]
-
-                case DIID_OK:
-                    text = dlgNPC->Request ? json_Npc[2] : json_Npc[1];
-                    break; // подсказка Ok
-
-                default:
-                    text = o_NullString;    break;
-            }
-        NPC_StatBar->SetText(text);
-        NPC_StatBar->Draw();
-        NPC_StatBar->RedrawScreen();
-        }
-    } // type == MT_MOUSEOVER
-
-    if (msg->type == MT_MOUSEBUTTON)
-    {
-        if (msg->subtype == MST_RBUTTONDOWN)  // ПКМ
-        {
-            int IDR = msg->item_id;
-            switch (IDR)
-            {
-                case 3:
-                    b_MsgBox(json_Npc[3], MBX_RMC);
-                    break;  // уволить командира
-
-                case 6: case 11:
-                    b_MsgBox(dlgNPC->Description, MBX_RMC);
-                    break; // биография
-
-                case 15:
-                    b_MsgBox(dlgNPC->TypePopUpText, MBX_RMC);
-                    break; // описание класса командира
-
-                case 46:
-                    b_MsgBoxAndDef(npc1Def, (int)dlgNPC->SpecIcon1, dlgNPC->SpecPopUpText1);
-                    break;      // спец навык класса 1
-
-                case 47:
-                    b_MsgBoxAndDef(npc1Def, (int)dlgNPC->SpecIcon2, dlgNPC->SpecPopUpText2);
-                    break;      // спец навык класса 2
-
-                case 48: case 49: case 50: case 51: case 52: case 53:  // артефакты[48-53]
-                    b_MsgBoxD(dlgNPC->ArtPopUpTexts[IDR -48], MBX_RMC, 8, (int)dlgNPC->ArtIcons[IDR -48]);
-                    break;
-
-                case 54: case 55: case 56: case 57: case 58: case 59:  // основные навыки[54-59]
-                    b_MsgBoxAndDef(npc2Def, (int)dlgNPC->Bonus[IDR -54], dlgNPC->BonusPopUpText[IDR -54]);
-                    break;
-
-                case 60: case 61: case 62: case 63: case 64: case 65:  // доп. навыки[60-65]
-                    b_MsgBoxAndDef(npc3Def, (int)dlgNPC->SpecBonus[IDR -60], dlgNPC->SpecBonusPopUpText[IDR -60]);
-                    break;
-
-                case 67: case 68: case 69: case 70: case 71: case 72:  // изучаемые. навыки[67-72]
-                    b_MsgBoxAndDef(npc2Def, (int)dlgNPC->Next[IDR -67], dlgNPC->NextPopUpTexts[IDR -67]);
-                    break;
-
-                default:
-                    break;
-            }
-        } // subtype == MST_RBUTTONDOWN
-        if (msg->subtype == MST_LBUTTONCLICK) // ЛКМ при отжатии
-        {
-            if (msg->item_id == 3)  {
-                b_MsgBox(txtresWOG->GetString(62), MBX_OKCANCEL); // увольняем командира
-                if (o_WndMgr->result_dlg_item_id == DIID_OK){
-                    dlgNPC->DlgLeft = -1;
-                    return dlg->Close(msg);
-                }
-            }
-
-        } // subtype == MST_LBUTTONCLICK
-
-        if (msg->subtype == MST_LBUTTONDOWN)  // ЛКМ при нажатии
-        {
-            if (dlgNPC->Request == 2) // повышение уровня с выбором навыков
-            {
-                if ( msg->item_id >= 67 && msg->item_id <= 72 )
+                char* text = NPC_GetHint(dlgNPC, item->id);
+                if (!text)
+                    text = o_NullString;
+                if (!NPC_StatBar->text || strcmp(NPC_StatBar->text, text))
                 {
-                    int last_id = dlgNPC->DlgLeft; // всегда +1
-                    int this_id = msg->item_id - 66; // всегда +1
-
-                    if (last_id == this_id && ((o_GetTime() - time_click) < 300 ) ) { // реализация дабл_клика по выбранному навыку
-                        // e_ClickSound();
-                        return dlg->Close(msg);
-                    } else {
-                        ((_DlgStaticDef_*)dlg->GetItem(66 + last_id))->def_frame_index = (int)dlgNPC->Next[last_id -1];
-                        ((_DlgStaticDef_*)dlg->GetItem(msg->item_id))->def_frame_index = (int)dlgNPC->NextActive[this_id -1];
-                        ((_DlgStaticDef_*)dlg->GetItem(msg->item_id))->RedrawScreen();
-                        dlgNPC->DlgLeft = this_id;
-                        // e_ClickSound();
-                    }
-                    time_click = o_GetTime();
-                }
-            } else {// !dlgNPC->Request
-                if ( msg->item_id >= 48 && msg->item_id <= 53 ) {
-                    int itid = msg->item_id -48;
-                    if ( (dlgNPC->Flags & 4) && (dlgNPC->Request == 0) ) { // если можно передавать артефакты
-
-                        sprintf(o_TextBuffer, "%s\n\n%s", dlgNPC->ArtPopUpTexts[itid], txtresWOG->GetString(79));
-                        b_MsgBoxD(o_TextBuffer, MBX_OKCANCEL, 8, (int)dlgNPC->ArtIcons[itid]);
-
-                        if (o_WndMgr->result_dlg_item_id == DIID_OK){
-                            dlgNPC->ArtOutput[itid] = 1; // отдаём артефакт
-                            return dlg->Close(msg);
-                        }
-                    }
+                    NPC_StatBar->SetText(text);
+                    NPC_StatBar->Draw();
+                    NPC_StatBar->RedrawScreen();
                 }
             }
-        } // subtype == MST_LBUTTONDOWN
-    } // type == MT_MOUSEBUTTON
+            break;
+        }
+        case MT_MOUSEBUTTON:
+            switch (msg->subtype)
+            {
+                case MST_RBUTTONDOWN:
+                    NPC_ShowPopup(dlgNPC, msg->item_id);
+                    break;
+                case MST_LBUTTONCLICK:
+                    if (NPC_OnLeftClick(dlg, dlgNPC, msg->item_id))
+                        return dlg->Close(msg);
+                    break;
+                case MST_LBUTTONDOWN:
+                    if (NPC_OnLeftButtonDown(dlg, dlgNPC, msg->item_id))
+                        return dlg->Close(msg);
+                    break;
+                default:
+                    break;
+            }
+            break;
+        default:
+            break;
+    }
 
     // Если прописан чит-код "gosolo"
     if (o_AutoSolo == 1) {
@@ -302,6 +420,12 @@ _int_ __cdecl Y_Dlg_NPC_Show(HiHook* hook, _DlgNPC_* dlgNPC)
     }
     _CustomDlg_* dlg = _CustomDlg_::Create(-1, -1, x, y, DF_SCREENSHOT | DF_SHADOW, Y_New_CommanderDlg_Proc);
 
+    // The state lives until Run returns and belongs to this dialog only.
+    NpcSkillsScrolling::State skillsScrolling = {};
+    NpcSkillsScrolling::Collect(skillsScrolling, npc);
+    const bool scrollSkills = skillsScrolling.count > NpcSkillsScrolling::VISIBLE_SKILLS;
+    dlg->custom_data[0] = scrollSkills ? (_dword_)&skillsScrolling : 0;
+
     // установить курсор(0,0)
     _MouseMgr_* mouse = o_MouseMgr;
     mouse->SetMouseCursor(0, 0);
@@ -327,8 +451,8 @@ _int_ __cdecl Y_Dlg_NPC_Show(HiHook* hook, _DlgNPC_* dlgNPC)
     _DlgButton_* bttnOK;
     bttnOK = b_DlgButton_Create(285,  dlg->height -76, 64, 30, DIID_OK, iOkayDef, 0, 1, 1, 0, 2);
     // и сразу делаем выход и на ESC и ENTER
-    int hotkey = 1;     CALL_4(int, __thiscall, 0x404230, &bttnOK->hotkeys_struct, bttnOK->hotkeys_end, 1, &hotkey);
-        hotkey = 28;    CALL_4(int, __thiscall, 0x404230, &bttnOK->hotkeys_struct, bttnOK->hotkeys_end, 1, &hotkey);
+    bttnOK->AddHotKey(HK_ESC);
+    bttnOK->AddHotKey(HK_ENTER);
     dlg->AddItem(bttnOK);
 
     // (id = 3) кнопка уволить командира
@@ -442,9 +566,25 @@ _int_ __cdecl Y_Dlg_NPC_Show(HiHook* hook, _DlgNPC_* dlgNPC)
 
     // (id = 60 - 65) дополнительные навыки командира (пропатчено по адресу 0x76A92F)
     for (int i = 0; i < 6; ++i ){
-        if ((int)dlgNPC->SpecBonus[i]) { // если кадр дефа != 0 (пропатчено в 0x76A92F)
-            dlg->AddItem(_DlgStaticDef_::Create(57 +93*i, 367, 46, 46, 60+i, npc3Def, (int)dlgNPC->SpecBonus[i], 0, 18));
+        const int frame = scrollSkills ? skillsScrolling.frames[i] : (int)dlgNPC->SpecBonus[i];
+        if (frame) { // если кадр дефа != 0 (пропатчено в 0x76A92F)
+            dlg->AddItem(_DlgStaticDef_::Create(57 +93*i, 367, 46, 46, 60+i, npc3Def, frame, 0, 18));
         }
+    }
+    if (scrollSkills)
+    {
+        auto leftButton = _DlgButton_::Create(32, 370, NpcSkillsScrolling::LEFT_BUTTON, "hsbtns3.def", 0, 1, 0, 0);
+        leftButton->AddHotKey(HK_A);
+        leftButton->AddHotKey(HK_ARROW_LEFT);
+        dlg->AddItem(leftButton);
+
+
+        auto rightButton = _DlgButton_::Create(577, 370, NpcSkillsScrolling::RIGHT_BUTTON, "hsbtns5.def", 0, 1, 0, 0);
+        rightButton->AddHotKey(HK_D);
+        rightButton->AddHotKey(HK_ARROW_RIGHT);
+        dlg->AddItem(rightButton);
+
+        NpcSkillsScrolling::Update(dlg, dlgNPC, skillsScrolling);
     }
     // согласно исходников WoG функция будет возвращать
     // номер выбранной картинки, если Request = 1
