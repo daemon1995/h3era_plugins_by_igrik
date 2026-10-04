@@ -57,54 +57,6 @@ int __stdcall Y_Lo_Dlg_HeroLvlUp_Create(LoHook* h, HookContext* c)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// быстро закончить бой по Q
-struct QuickBattleInfo
-{
-    _int_ QuickBattle = 0;
-    _int_ BattleAutoSpells = 0;
-	_int_ isNeedRestore = 0;
-} quickBattleInfo;
-//_int_ saveManaHero[2][2];
-
-_int_ __stdcall Y_BATTLE_Proc(HiHook* hook, _BattleMgr_* bm, _EventMsg_* msg)
-{
-    if ( msg->type == MT_KEYDOWN ) {
-        if ( msg->subtype == HK_Q ) {
-            if ( (bm->isHuman[0] && !bm->isHuman[1]) || (!bm->isHuman[0] && bm->isHuman[1]) ) {
-
-                if ( b_MsgBox( json_Combat[0], MBX_OKCANCEL) ) {                    
-
-
-                    // очистить массив теней курсора
-                    CALL_0(int, __cdecl, 0x493EF0);
-                    
-                    if (!quickBattleInfo.isNeedRestore)
-                    {
-                        quickBattleInfo.QuickBattle = o_QuickBattle;
-                        quickBattleInfo.BattleAutoSpells = IntAt(0x06987E8); // g_BattleAutoSpells
-                        quickBattleInfo.isNeedRestore = true;
-                    }
-                    o_QuickBattle = true;
-                    IntAt(0x06987E8) = false; // отключить авто-каст заклинаний в бою
-                    return 1;
-                } 
-            }
-        }
-    }
-    return CALL_2(_int_, __thiscall, hook->GetDefaultFunc(), bm, msg);  
-}
-
-int __stdcall Y_EndBattle(LoHook* h, HookContext* c)
-{
-    if (quickBattleInfo.isNeedRestore ) {
-
-        o_QuickBattle = quickBattleInfo.QuickBattle;
-        IntAt(0x06987E8) = quickBattleInfo.BattleAutoSpells; // восстановить авто-каст заклинаний в бою
-        quickBattleInfo = {};
-    }
-    return EXEC_DEFAULT;
-} 
-
 void StartHD5Functions()
 {
     // дабблклик в окне повышения уровня героя
@@ -112,9 +64,6 @@ void StartHD5Functions()
     // _PI->WriteHiHook(0x4F8F10, SPLICE_, EXTENDED_, THISCALL_, Y_Dlg_HeroLvlUp_Create);
     _PI->WriteLoHook(0x4F8F15, Y_Lo_Dlg_HeroLvlUp_Create);
 
-    // быстро закончить бой по Q
-    _PI->WriteHiHook(0x473F55, CALL_, EXTENDED_, THISCALL_, Y_BATTLE_Proc);
-    _PI->WriteLoHook(0x476DA5, Y_EndBattle);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
