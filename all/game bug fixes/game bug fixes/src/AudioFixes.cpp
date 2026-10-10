@@ -573,7 +573,11 @@ static void InstallBattleTransitions()
                         audio->WriteLoHook(0x0059AE42, FadeInBegin),
                         audio->WriteLoHook(0x0059AE54, FadeInStep),
                         audio->WriteHiHook(0x00462600, SPLICE_, EXTENDED_, THISCALL_, StartBattle),
-                        audio->WriteHiHook(0x00462E40, SPLICE_, EXTENDED_, THISCALL_, FinishBattle),
+                        //audio->WriteHiHook(0x00462E40, SPLICE_, EXTENDED_, THISCALL_, FinishBattle),
+
+                        // Amethyst hooks 462E42 inside Finish's prologue. Keep
+                        // the code intact and intercept the manager's stop slot.
+                        audio->WriteHiHook(0x0063D3EC, FUNCPTR_, EXTENDED_, THISCALL_, FinishBattle),
                         audio->WriteLoHook(0x004626EA, LoadBattleWav),
                         audio->WriteHiHook(0x00462C2B, CALL_, EXTENDED_, THISCALL_, PreBattleWavNoWait),
                         audio->WriteHiHook(0x00462C65, CALL_, EXTENDED_, THISCALL_, StartCombatMusic),
