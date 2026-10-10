@@ -99,6 +99,7 @@
   <ItemGroup>
     <ClCompile Include="..\..\..\include\era.cpp" />
     <ClCompile Include="game bug fixes.cpp" />
+    <!-- Included by game bug fixes.cpp, like the other src modules. -->
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stdafx.h" />

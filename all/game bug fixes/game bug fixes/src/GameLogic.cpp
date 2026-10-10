@@ -1,3 +1,5 @@
+#include "PluginRng.h"
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 // by igrik /////////////////////////////////////////////////////////////////////////////////////////
@@ -34,7 +36,7 @@ int __stdcall Y_SetCanselScholarlySS(LoHook *h, HookContext *c)
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // исправление созданий WoG'ом корявых пакованых координат
-_dword_ __cdecl Y_WoG_MixedPos_Fix(HiHook *hook, int x, int y, int z)
+_dword_ __cdecl Y_WoG_MixedPos_Fix(int x, int y, int z)
 {
     _dword_ xyz = b_pack_xyz(x, y, z);
 
@@ -42,7 +44,7 @@ _dword_ __cdecl Y_WoG_MixedPos_Fix(HiHook *hook, int x, int y, int z)
 }
 
 // исправление созданий WoG'ом корявых разпакованных координат
-void __cdecl Y_WoG_UnMixedPos_Fix(HiHook *hook, _dword_ x, _dword_ y, _dword_ z, _dword_ xyz)
+void __cdecl Y_WoG_UnMixedPos_Fix(_dword_ x, _dword_ y, _dword_ z, _dword_ xyz)
 {
     *(_dword_ *)x = b_unpack_x(xyz);
     *(_dword_ *)y = b_unpack_y(xyz);
@@ -177,7 +179,7 @@ _LHF_(Y_FixBattle_StackStepBack)
     return EXEC_DEFAULT;
 }
 
-bool __stdcall WoG_OnMapRestartCrtraitsReset(HiHook *hook, const BOOL isWogMap)
+bool __cdecl WoG_OnMapRestartCrtraitsReset(const BOOL isWogMap)
 {
     return 1;
 }
@@ -241,18 +243,12 @@ _LHF_(Y_Fix_HeroesInteract)
  */
 _LHF_(Y_Fix_HeroesOnWaterCheckInteract)
 {
-    _MapItem_ *mapItem = (_MapItem_ *)(c->eax);
-    _Hero_ *heroRigth = o_GameMgr->GetHero(mapItem->setup);
-
-    if (mapItem && heroRigth && heroRigth->temp_mod_flags & 0x40000 || mapItem->land == 8)
-        c->eax = TRUE;
-    else
-        c->eax = FALSE;
-
+    const _MapItem_ *mapItem = reinterpret_cast<_MapItem_ *>(c->eax);
+    const _Hero_ *heroRight = mapItem ? o_GameMgr->GetHero(mapItem->setup) : nullptr;
+    c->eax = mapItem && ((heroRight && (heroRight->temp_mod_flags & 0x40000)) || mapItem->land == 8);
     c->return_address = 0x4814DD;
     return NO_EXEC_DEFAULT;
 }
-
 // Исправление копейщиков в лагерях беженцев (только для клетки с триггером).
 _LHF_(LoHook_FixRefugeeCamp_dx)
 {
@@ -326,8 +322,11 @@ _LHF_(Y_OnDeleteObjectOnMap)
 int globRecord = false;
 int __stdcall HiHook_004aa820(HiHook *h, _AdvMgr_ *a2, _MapItem_ *a3, int XYZ, int record)
 {
+    const int previousRecord = globRecord;
     globRecord = record;
-    return CALL_4(int, __thiscall, h->GetDefaultFunc(), a2, a3, XYZ, record);
+    const int result = CALL_4(int, __thiscall, h->GetDefaultFunc(), a2, a3, XYZ, record);
+    globRecord = previousRecord;
+    return result;
 }
 
 _LHF_(LoHook_004AA9B3)
@@ -379,12 +378,19 @@ _LHF_(LoHook_004AA9B3)
     if (cell->object_type == 34)
     {
         hero = o_GameMgr->GetHero(cell->setup);
-        hero->Hide();
+        if (hero)
+            hero->Hide();
     }
     if (cell->object_type == 8)
     {
-        v4 = &o_GameMgr->Field<_List_<_Boat_>>(0x4E3B8)[cell->setup];
-        CALL_3(void, __thiscall, 0x4D7840, v4, 8, v4->index);
+        auto &boats = o_GameMgr->Field<_List_<_Boat_>>(0x4E3B8);
+        if (boats.Data && cell->setup >= 0 && cell->setup < boats.EndData - boats.Data)
+        {
+            v4 = &boats[cell->setup];
+            // Like heroes, boats must be hidden before clearing the object below.
+            // Show is a no-op while visible and cannot restore a cleared setup.
+            CALL_1(void, __thiscall, 0x4D7950, v4);
+        }
     }
     cell->setup = -1;
     if (v4)
@@ -491,7 +497,9 @@ _LHF_(js_Cast_AdventureMagic_BeforeCheckFlyPower)
     {
         // cast power is more than current fly power
         const auto &spell = o_Spell[SPL_FLY];
-        if (spell.effect[c->edi] > spell.effect[hero->fly_cast_power])
+        const int currentPower = hero->fly_cast_power;
+        if (currentPower >= 0 && currentPower < 4 && c->edi >= 0 && c->edi < 4 &&
+            spell.effect[c->edi] > spell.effect[currentPower])
         {
             c->return_address = 0x041C886;
             return NO_EXEC_DEFAULT;
@@ -617,30 +625,7 @@ _LHF_(LoHook_00441AFF)
     return NO_EXEC_DEFAULT;
 }
 
-struct PluginRNG
-{
-  private:
-    uint32_t seed = 123456;
-
-  public:
-    void srand(uint32_t s)
-    {
-        seed = s;
-    }
-    int next()
-    {
-        seed = seed * 214013 + 2531011;
-        return (seed >> 16) & 0x7FFF;
-    }
-
-    int range(int low, int high)
-    {
-        if (high <= low)
-            return low;
-        return low + next() % (high - low + 1);
-    }
-};
-thread_local PluginRNG g_pluginDrawRng, g_pluginAIRng /*, g_pluginDebugRng,*/ /*g_pluginAIQucikRng*/;
+static thread_local PluginRNG g_pluginAIRng;
 
 static void __stdcall BattleMgr_SetRandomSeed(HiHook *h, unsigned int seed)
 {
@@ -649,7 +634,7 @@ static void __stdcall BattleMgr_SetRandomSeed(HiHook *h, unsigned int seed)
     IntAt(0x06987E8) = Clamp(0, IntAt(0x06987E8), 1);
 
     CALL_1(void, __thiscall, h->GetDefaultFunc(), seed);
-    g_pluginDrawRng.srand(seed);
+    CombatVisualRng().srand(seed);
     g_pluginAIRng.srand(seed);
 
     // g_pluginAIQucikRng.srand(seed);
@@ -657,15 +642,22 @@ static void __stdcall BattleMgr_SetRandomSeed(HiHook *h, unsigned int seed)
 }
 static int __stdcall BattleMgrProc_AnimationRandom(HiHook *h, const int low, const int high)
 {
-    return g_pluginDrawRng.range(low, high);
+    return CombatVisualRng().range(low, high);
 }
-static unsigned int __cdecl BattleMgrProc_AnimationPureRandom(HiHook *h)
+static unsigned int __cdecl BattleMgrProc_AnimationPureRandom()
 {
-    return g_pluginDrawRng.next();
+    return CombatVisualRng().next();
 }
 static int __stdcall BattleMgrProc_AIRandom(HiHook *h, const int low, const int high)
 {
     return g_pluginAIRng.range(low, high);
+}
+_ERH_(OnSetupBattleField)
+{
+
+    static int comatCounter = 0;
+    std::string message = "Battle " + std::to_string(comatCounter++) + " started";
+    Era::WriteLog("GBFE", "New Combat Begins", message.c_str());
 }
 
 // static int __stdcall DEBUG_Random(HiHook *h, const int low, const int high)
@@ -707,14 +699,15 @@ _LHF_(TownDemolishion_BeforeBuildingRebuild)
 
     return EXEC_DEFAULT;
 }
-void __stdcall TownDemolishion_BeforeGraphicsChange(HiHook *h, int flags)
+_LHF_(TownDemolishion_BeforeGraphicsChange)
 {
     if (wogTownDemolishionType)
     {
-        flags = -1; // меняем на сельскую управу
+        // 70AA96 calls a cdecl function with flags on the stack, not in ECX.
+        IntAt(c->esp) = -1;
         wogTownDemolishionType = 0;
     }
-    CALL_1(void, __cdecl, h->GetDefaultFunc(), flags);
+    return EXEC_DEFAULT;
 }
 // исправление чита "построить все здания". На сбрасывается флаг введённого чита
 _ERH_(OnGameLeave)
@@ -731,40 +724,58 @@ _BattleStack_ *afterSorceressAbilityTarget = nullptr;
 _BattleStack_ *afterHellSteedAbilityTarget = nullptr;
 _BattleStack_ *afterAnyAttackAbilityTarget = nullptr;
 
+// Preserve the attacker context if another hook reenters PrepareMelee/PrepareShoot.
+struct AttackContextScope
+{
+    Patch *patch;
+    bool previousPatchState;
+    _BattleStack_ *previousAttacker;
+    _BattleStack_ *previousSorceressTarget;
+    _BattleStack_ *previousHellSteedTarget;
+    _BattleStack_ *previousAbilityTarget;
+
+    AttackContextScope(_BattleStack_ *attacker, Patch *resetPatch)
+        : patch(resetPatch), previousPatchState(patch && patch->IsApplied()),
+          previousAttacker(combatActionAttacker), previousSorceressTarget(afterSorceressAbilityTarget),
+          previousHellSteedTarget(afterHellSteedAbilityTarget), previousAbilityTarget(afterAnyAttackAbilityTarget)
+    {
+        if (patch)
+        {
+            if (attacker->active_spell_duration[SPL_BERSERK] == 0)
+                patch->Apply();
+            else
+                patch->Undo();
+        }
+        combatActionAttacker = attacker;
+        afterSorceressAbilityTarget = nullptr;
+        afterHellSteedAbilityTarget = nullptr;
+        afterAnyAttackAbilityTarget = nullptr;
+    }
+    ~AttackContextScope()
+    {
+        if (patch)
+        {
+            if (previousPatchState)
+                patch->Apply();
+            else
+                patch->Undo();
+        }
+        combatActionAttacker = previousAttacker;
+        afterSorceressAbilityTarget = previousSorceressTarget;
+        afterHellSteedAbilityTarget = previousHellSteedTarget;
+        afterAnyAttackAbilityTarget = previousAbilityTarget;
+    }
+};
 void __stdcall BattleStack_PrepareMelee(HiHook *h, _BattleStack_ *attacker, int direction)
 {
-    const BOOL noBerserkBeforeAttack = attacker->active_spell_duration[SPL_BERSERK] == 0;
-    if (noBerserkBeforeAttack)
-        skipMeleeBerserkReset->Apply();
-    combatActionAttacker = attacker;
-
+    const AttackContextScope scope(attacker, skipMeleeBerserkReset);
     CALL_2(void, __thiscall, h->GetDefaultFunc(), attacker, direction);
-
-    if (noBerserkBeforeAttack)
-        skipMeleeBerserkReset->Undo();
-    combatActionAttacker = nullptr;
-    afterSorceressAbilityTarget = nullptr;
-    afterHellSteedAbilityTarget = nullptr;
-    afterAnyAttackAbilityTarget = nullptr;
 }
 void __stdcall BattleStack_PrepareShoot(HiHook *h, _BattleStack_ *attacker)
 {
-    const BOOL noBerserkBeforeAttack = attacker->active_spell_duration[SPL_BERSERK] == 0;
-    if (noBerserkBeforeAttack)
-        skipRangeBerserkReset->Apply();
-    combatActionAttacker = attacker;
-
+    const AttackContextScope scope(attacker, skipRangeBerserkReset);
     CALL_1(void, __thiscall, h->GetDefaultFunc(), attacker);
-
-    if (noBerserkBeforeAttack)
-        skipRangeBerserkReset->Undo();
-
-    combatActionAttacker = nullptr;
-    afterSorceressAbilityTarget = nullptr;
-    afterHellSteedAbilityTarget = nullptr;
-    afterAnyAttackAbilityTarget = nullptr;
 }
-
 struct CreatureSpellData
 {
     const eSpell spellID = eSpell::NONE;
@@ -957,6 +968,8 @@ void __stdcall OnAfterAttackDrawActionPlay(HiHook *h, _BattleMgr_ *mgr, const in
     };
     const CrExpBonStr *bonusStr = *reinterpret_cast<CrExpBonStr **>(0x071D826 + 2);
     const int expLvl = IntAt(0x0847D94);
+    if (!bonusStr || expLvl < 0 || expLvl >= 11)
+        return;
 
     for (size_t i = 0; i < 14; i++)
     {
@@ -966,7 +979,7 @@ void __stdcall OnAfterAttackDrawActionPlay(HiHook *h, _BattleMgr_ *mgr, const in
 
             const eSpell spellToCast = eSpell(bonus.Mod);
             const int chanceToCast = bonus.Lvls[expLvl];
-            if (spellToCast < 0 || chanceToCast < 1)
+            if (spellToCast < 0 || spellToCast > eSpell::ACID_BREATH || chanceToCast < 1)
                 continue;
 
             if (chanceToCast >= 100 || chanceToCast >= Randint(1, 100))
@@ -995,241 +1008,7 @@ _LHF_(BattleMgr_TryToCastAutoSpell)
 
     return EXEC_DEFAULT;
 }
-int storedValue = 0;
-char storedWavName[13];
 
-//
-//// Идёт ли сейчас предбитвенный звук.
-//_bool_ IsPreBattleSound = FALSE;
-//// Сообщение о возможности пропуска предбитвенного звука.
-//// TString PreBattleSound_SkippingMessage = NULL;
-//
-//// При загрузке и старте звука делаем его параллельным.
-//_Sample_ __stdcall HookOn_Load_Start_Sample(HiHook *h, _cstr_ Name)
-//{
-//    // Предбитвенный звук возвращаем стандартно.
-//    if (IsPreBattleSound)
-//    {
-//        return CALL_1(_Sample_, __fastcall, h->GetDefaultFunc(), Name);
-//    }
-//    // Иные звуки...
-//    else
-//    {
-//        // Проигрываем звук распараллеленно.
-//        CALL_3(void, __fastcall, 0x59A890, Name, -1, 3);
-//
-//        // Возвращаем неудачу при загрузке.
-//        return EmptySample;
-//    }
-//}
-//
-//// При загрузке и старте звука предбитвенного звука загружаем и начинаем его как обычно.
-//_Sample_ __stdcall HookOn_Load_Start_PreBattle_Sample(HiHook *h, _cstr_ Name)
-//{
-//    IsPreBattleSound = TRUE;
-//
-//    // Инициализуруем и начинаем звук.
-//    _Sample_ Sample = CALL_1(_Sample_, __fastcall, h->GetDefaultFunc(), Name);
-//    ;
-//
-//    IsPreBattleSound = FALSE;
-//
-//    return Sample;
-//}
-//// Пропуск стандартного окончания звука.
-//void __stdcall HookOn_End_Sample_Std(_Sample_ Sample)
-//{
-//    // Не оканчиваем эти звуки.
-//    return;
-//}
-//// При ожидании и окончании проигрывания звука пропускаем это для всех звуков, кроме предбитвенного.
-//void __stdcall HookOn_Wait_End_Close_Sample(HiHook *h, int Time, _Sample_ Sample)
-//{
-//    // Если звук предбитвенный - проигрываем.
-//    if (IsPreBattleSound)
-//    {
-//        CALL_3(void, __thiscall, h->GetDefaultFunc(), Time, Sample.Wav, Sample.PlayingInd);
-//    }
-//}
-//// Проверка возможности отрисовки битвы.
-//_bool_ CanDrawBattle()
-//{
-//    if (*(DWORD*)((DWORD)o_BattleMgr + 78584) || o_BattleMgr->ShouldNotRenderBattle() || !*(DWORD*)((DWORD)o_BattleMgr + 78592))
-//    {
-//        return FALSE;
-//    }
-//    else
-//    {
-//        return TRUE;
-//    }
-//}
-//// При ожидании и окончании проигрывания предбитвенного звука...
-//void __stdcall HookOn_Wait_End_Close_PreBattleSample(HiHook *h, int Time, _Sample_ Sample)
-//{
-//
-//    IsPreBattleSound = TRUE;
-//
-//    // Инициализация времени анимации ожидания.
-//    WaitAnimTime = o_GetTime();
-//
-//    // Сообщение о возможности пропуска.
-//    strcpy(H3TempStr, "");
-//    CALL_4(void, __thiscall, 0x4729D0, *(DWORD *)((DWORD)o_BattleMgr + 78588), H3TempStr, 0, 0);
-//
-//    // Проигрываем предбитвенный звук нормально.
-//    CALL_3(void, __thiscall, h->GetDefaultFunc(), Time, Sample.Wav, Sample.PlayingInd);
-//
-//    // Стираем сообщение о возможности пропуска.
-//    CALL_4(void, __thiscall, 0x4729D0, *(DWORD *)((DWORD)o_BattleMgr + 78588), &EmptyVar, 0, 0);
-//
-//    IsPreBattleSound = FALSE;
-//}
-//
-//// При расчёте времени проигрывании звука в бою учитываем его настройки скорости.
-//int __stdcall HookOn_Wait_End_Close_Sample_CalcTime(LoHook *h, HookContext *c)
-//{
-//    // Если это звук битвы, но не предбитвенная панорама, умножаем на моножитель скорости.
-//    if (CanDrawBattle() && !IsPreBattleSound)
-//    {
-//        c->esi = (DWORD)(((double)(c->esi)) * (BattleAnimPeriodFactors[Settind_BattleFast]));
-//    }
-//
-//    return EXEC_DEFAULT;
-//}
-//// При ожидании и окончании звука в бою также отрисовываем анимацию.
-//int __stdcall HookOn_Wait_End_Close_Sample_Play(LoHook *h, HookContext *c)
-//{
-//    // Если это битва и настало время, отрисовываем анимацию ожидания.
-//    if (CanDrawBattle() && o_GetTime() - WaitAnimTime >= 0)
-//    {
-//        // Очистка полей перерисовки.
-//        o_BattleMgr->ClearRedrawFields();
-//        // Проигрывание случайной анимации.
-//        o_BattleMgr->PlayWaitAnim();
-//        // Отрисовка.
-//        o_BattleMgr->RedrawBattlefield(TRUE, TRUE, TRUE, 0, TRUE, FALSE);
-//    }
-//    // Если сейчас предбитвенный звук и была нажата клавиша ESC, завершаем его.
-//    if (IsPreBattleSound)
-//    {
-//        // Получаем первое несчитанное событие.
-//        _EventMsg_ event_msg;
-//        o_InputMgr->Peek_Event(&event_msg);
-//
-//        // Если событие - нажатие клавиши ESC, заверщаем звук.
-//        if (event_msg.type == 1 && event_msg.subtype == 1)
-//        {
-//            // Время завершения - в близжайший момент.
-//            IntAt(c->ebp - 4) = 0;
-//        }
-//    }
-//
-//    return EXEC_DEFAULT;
-//}
-//
-//// При ожидании проигрывания звука пропускаем его.
-//void __stdcall HookOn_Wait_Sample(HiHook *h, _ptr_ SoundMgr, _dword_ SampleInd, int Time)
-//{
-//    // Не ожидаем.
-//    return;
-//}
-//
-//// При расчёте времени ожидания звука в бою учитываем его настройки скорости.
-//int __stdcall HookOn_Wait_Sample_CalcTime(LoHook *h, HookContext *c)
-//{
-//    // Если это звук битвы, но не предбитвенная панорама, умножаем на моножитель скорости.
-//    if (CanDrawBattle())
-//    {
-//        c->esi = (_int32_)(((double)(c->esi)) * (BattleAnimPeriodFactors[Settind_BattleFast]));
-//    }
-//
-//    return EXEC_DEFAULT;
-//}
-//
-//// При ожидании звука в бою также отрисовываем анимацию.
-//int __stdcall HookOn_Wait_Sample_Play(LoHook *h, HookContext *c)
-//{
-//    // Если это битва и настало время, отрисовываем анимацию ожидания.
-//    if (CanDrawBattle() && o_GetTime() - WaitAnimTime >= 0)
-//    {
-//        // Очистка полей перерисовки.
-//        o_BattleMgr->ClearRedrawFields();
-//        // Проигрывание случайной анимации.
-//        o_BattleMgr->PlayWaitAnim();
-//        // Отрисовка.
-//        o_BattleMgr->RedrawBattlefield(TRUE, TRUE, TRUE, 0, TRUE, FALSE);
-//    }
-//
-//    return EXEC_DEFAULT;
-//}
-
-__int64 __stdcall CombatStartSound_LoadAndPlay(HiHook *h, char *name)
-{
-    strncpy(storedWavName, name, sizeof(storedWavName) - 1);
-    storedWavName[sizeof(storedWavName) - 1] = '\0';
-
-    // CALL_3(void, __fastcall, 0x059A890, name, -1, 3);
-
-    return INT64(12);
-}
-void __stdcall CombatStartSound_WaitToPlay(HiHook *h, int timeToWait, _Wav_ *wav, int stopSounds)
-{
-
-    //    CALL_3(void, __fastcall, 0x059A890, storedWavName, -1, 3);
-    // CALL_3(void, __fastcall, 0x059A890, wav->name, -1, 3);
-    //   CALL_3(void, __thiscall, h->GetDefaultFunc(), timeToWait, wav, stopSounds);
-}
-void __stdcall PlayCombatMusicAtStart(HiHook *h, _SoundMgr_ *snd, char *name, int atStart, int loop)
-{
-
-    // storedValue = snd->f0[0x8C];
-    // snd->f0[0x8C] = 0;
-    auto currentStream = IntAt(0x069FED8);
-    if (currentStream)
-    {
-        CALL_1(int, __stdcall, IntAt(0x0063A42C), currentStream);
-        IntAt(0x069FED8) = 0;
-    }
-
-    //  CALL_4(void, __thiscall, 0x059A090, snd, 0);
-}
-_LHF_(Dlg_BattleResults_StopVictoryMusic)
-{
-
-    /* o_SoundMgr->f0[0x8C] = 0;
-     o_SoundMgr->f0[0x8D] = 0;
-     o_SoundMgr->f0[0x8E] = 0;
-     o_SoundMgr->f0[0x8F] = 0;*/
-    //  CALL_1(void, __thiscall, 0x059AF00, o_SoundMgr);
-    //  CALL_4(void, __thiscall, 0x059AFB0, o_SoundMgr, "", 0, 0);
-
-    // CALL_2(void, __thiscall, 0x059A090, o_SoundMgr, 1);
-    //  CALL_2(void, __thiscall, 0x059A090, o_SoundMgr,0);
-    //  //CALL_1(void, __thiscall, 0x059B310, o_SoundMgr);
-    //  o_SoundMgr->f0[0x8C] = 0;
-    //// Era::ExecErmCmd("MP:P0/0");
-    // storedValue = IntAt(0x06987A8 +8);
-    // if (true)
-    //{
-    // IntAt(0x06987A8 + 8) = 0;
-    //}
-    return EXEC_DEFAULT;
-}
-
-_LHF_(Dlg_BattleResults_End)
-{
-
-    //   o_SoundMgr->f0[0x8C] = storedValue;
-    // sprintf_s((char*)0x06A33F4, 260, "%s", "");
-    // sprintf_s((char*)0x06A32F0, 260, "%s", "");
-    // IntAt(0x06A33F4) = 0;
-    // CALL_1(void, __thiscall, 0x059B310, o_SoundMgr);
-    // CALL_2(void, __thiscall, 0x059A090, o_SoundMgr,1);
-    // CALL_1(void, __thiscall, 0x059B380, o_SoundMgr);
-    // Era::ExecErmCmd("MP:P0/0");
-    // o_SoundMgr->f0[0x8C] = storedValue;
-    return EXEC_DEFAULT;
-}
 
 // ##############################################################################################################################
 // ##############################################################################################################################
@@ -1246,8 +1025,8 @@ void GameLogic(PatcherInstance *_PI)
     _PI->WriteHiHook(0x523FE6, CALL_, EXTENDED_, THISCALL_, AIMgr_Stack_SetHexes_WayToMoveLength);
 
     // исправление созданий WoG'ом корявых пакованых координат
-    _PI->WriteHiHook(0x711E7F, SPLICE_, EXTENDED_, CDECL_, Y_WoG_MixedPos_Fix);
-    _PI->WriteHiHook(0x711F49, SPLICE_, SAFE_, CDECL_, Y_WoG_UnMixedPos_Fix);
+    _PI->WriteHiHook(0x711E7F, SPLICE_, DIRECT_, CDECL_, Y_WoG_MixedPos_Fix);
+    _PI->WriteHiHook(0x711F49, SPLICE_, DIRECT_, CDECL_, Y_WoG_UnMixedPos_Fix);
 
     // исправление бага с исчезновением стартового героя при переигрывании
     _PI->WriteByte(0x5029C0, 0xEB);
@@ -1289,7 +1068,7 @@ void GameLogic(PatcherInstance *_PI)
 
     // фикс WoG'a
 
-    _PI->WriteHiHook(0x070561A, CALL_, EXTENDED_, CDECL_, WoG_OnMapRestartCrtraitsReset);
+    _PI->WriteHiHook(0x070561A, CALL_, DIRECT_, CDECL_, WoG_OnMapRestartCrtraitsReset);
 
     // © daemon_n
     // фикс ERM команды CB:M: при проверке/установке типа и количество существ значение ограничивалось 196 (Драколич)
@@ -1367,9 +1146,6 @@ void GameLogic(PatcherInstance *_PI)
     _PI->WriteHiHook(0x0463606, CALL_, EXTENDED_, THISCALL_, BattleMgr_SetRandomSeed);
 
     DWORD lowHighDrawAnimationRandomFunctionAddresses[] = {
-        0x004626CF, // prebattle wav
-        0x00462C3A, // combat music start
-
         0x0047847D, // move and attack animation
         0x004789DB, // cast spell animation
         0x00478B4F, // walk animation
@@ -1386,7 +1162,6 @@ void GameLogic(PatcherInstance *_PI)
         0x004EB256, // creature info dlg monster def animation
         0x004EB3CC, // creature info dlg machine def animation
 
-        0x005998F8, // combat music continue
         0x005A570C, // ray attack animation
         0x005A5788, // ray attack animation
         0x005A61F2, // ray attack animation
@@ -1402,18 +1177,22 @@ void GameLogic(PatcherInstance *_PI)
     DWORD pureRandomFunctionAddresses[] = {0x0050B3DF}; // wait animation
     for (DWORD addr : pureRandomFunctionAddresses)
     {
-        _PI->WriteHiHook(addr, CALL_, EXTENDED_, CDECL_, BattleMgrProc_AnimationPureRandom);
+        _PI->WriteHiHook(addr, CALL_, DIRECT_, CDECL_, BattleMgrProc_AnimationPureRandom);
     }
     // DWORD lowHighAIQuickRandomFunctionAddresses[] = {0x0042723C, 0x00427260}; // AI_Calc_FastBattle_Finishing
     // for (DWORD addr : lowHighAIQuickRandomFunctionAddresses)
     //{
     //     _PI->WriteHiHook(addr, CALL_, EXTENDED_, FASTCALL_, BattleMgrProc_AIQuickRandom);
     // }
+    // Random AI tie-break and the AI-only extra bad-morale roll.
+    // Luck rolls and the primary morale rolls stay on the game RNG.
     DWORD lowHighAIRandomFunctionAddresses[] = {0x00421C82, 0x004647D0};
     for (DWORD addr : lowHighAIRandomFunctionAddresses)
     {
         _PI->WriteHiHook(addr, CALL_, EXTENDED_, FASTCALL_, BattleMgrProc_AIRandom);
     }
+
+    // Era::RegisterHandler(OnSetupBattleField, "OnSetupBattleField");
 
     // DWORD lowHighDebugRandomFunctionAddresses[] = {/*0x00443024*/,
     //                                                /* 0x00442FE9,*/ /* 0x004645B3, 0x004647A7, 0x04647D0,*/
@@ -1425,51 +1204,6 @@ void GameLogic(PatcherInstance *_PI)
     // }
     // © daemon_n
 
-    //  _PI->WriteHiHook(0x04626EA, CALL_, EXTENDED_, THISCALL_, CombatStartSound_LoadAndPlay);
-    // _PI->WriteHiHook(0x0462C2B, CALL_, EXTENDED_, THISCALL_, CombatStartSound_WaitToPlay);
-
-    // 0059AB30
-    // отключение музыки победы после закрытия диалога результатов битвы
-    // _PI->WriteLoHook(0x0047724F, Dlg_BattleResults_StopVictoryMusic);
-    // _PI->WriteLoHook(0x004772FE, Dlg_BattleResults_StopVictoryMusic);
-    // _PI->WriteLoHook(0x00477306, Dlg_BattleResults_End);
-    //  _PI->WriteHiHook(0x00462C65, CALL_, EXTENDED_, THISCALL_, PlayCombatMusicAtStart);
-    //  _PI->WriteJmp(0x00462C30, 0x00462C6A); // start combat music play
-    // _PI->WriteJmp(0x00477219, 0x0047723A); // end combat music play
-    // _PI->WriteJmp(0x0462645, 0x00462652); // start combat music clear
-
-    // Задержки проигрывания звука.
-
-    // При загрузке и старте звука делаем его параллельным.
-    //_PI->WriteHiHook(0x59A770, SPLICE_, EXTENDED_, FASTCALL_1, HookOn_Load_Start_Sample);
-
-    //// При загрузке и старте звука предбитвенного звука загружаем и начинаем его как обычно.
-    //_PI->WriteHiHook(0x4626EA, CALL_, EXTENDED_, FASTCALL_1, HookOn_Load_Start_PreBattle_Sample);
-
-    //// Убираем стандартные оканчивания звуков.
-    //_PI->WriteHiHook(0x419D45, CALL_, DIRECT_, STDCALL_, HookOn_End_Sample_Std);
-    //_PI->WriteHiHook(0x41A99A, CALL_, DIRECT_, STDCALL_, HookOn_End_Sample_Std);
-    //_PI->WriteHiHook(0x4AE364, CALL_, DIRECT_, STDCALL_, HookOn_End_Sample_Std);
-
-    //// При ожидании и окончании проигрывания звука пропускаем это для всех звуков, кроме предбитвенного.
-    //_PI->WriteHiHook(0x59A7C0, SPLICE_, EXTENDED_, THISCALL_, HookOn_Wait_End_Close_Sample);
-    //// При ожидании и окончании проигрывания предбитвенного звука...
-    //_PI->WriteHiHook(0x462C2B, CALL_, EXTENDED_, THISCALL_, HookOn_Wait_End_Close_PreBattleSample);
-
-    //// При расчёте времени проигрывании звука в бою учитываем его настройки скорости.
-    //_PI->WriteLoHook(0x59A7D2, HookOn_Wait_End_Close_Sample_CalcTime);
-
-    //// При ожидании и окончании звука в бою также отрисовываем анимацию.
-    //_PI->WriteLoHook(0x59A7E3, HookOn_Wait_End_Close_Sample_Play);
-
-    //// При ожидании проигрывания звука пропускаем его.
-    //_PI->WriteHiHook(0x59A1C0, SPLICE_, EXTENDED_, THISCALL_, HookOn_Wait_Sample);
-
-    //// При расчёте времени ожидания звука в бою учитываем его настройки скорости.
-    //_PI->WriteLoHook(0x59A1DA, HookOn_Wait_Sample_CalcTime);
-
-    //// При ожидании звука в бою также отрисовываем анимацию.
-    //_PI->WriteLoHook(0x59A1DF, HookOn_Wait_Sample_Play);
 
     if (!TIPHON)
     {
@@ -1488,7 +1222,7 @@ void GameLogic(PatcherInstance *_PI)
     // © daemon_n
     // исправление отображаемого def при разрушении зданий в городе без построенного форта
     _PI->WriteLoHook(0x70BF78, TownDemolishion_BeforeBuildingRebuild);
-    _PI->WriteHiHook(0x070AA96, CALL_, EXTENDED_, THISCALL_, TownDemolishion_BeforeGraphicsChange);
+    _PI->WriteLoHook(0x070AA96, TownDemolishion_BeforeGraphicsChange);
 
     // Баг? _BattleStack_::MeleeAtack (контратака) - фикс сайда
     _PI->WriteHiHook(0x441b5d, CALL_, EXTENDED_, THISCALL_, HiHook_00441b5d);
@@ -1561,6 +1295,11 @@ void GameLogic(PatcherInstance *_PI)
     // исправление имеет смысл для срабатывания берсерка при получении эффекта в качестве ответного удара/выстрела;
     skipMeleeBerserkReset = _PI->WriteJmp(0x0441C75, 0x0441C7E);
     skipRangeBerserkReset = _PI->WriteJmp(0x0440017, 0x0440020);
+    // WriteJmp applies immediately; the skips belong only to an active attack.
+    if (skipMeleeBerserkReset)
+        skipMeleeBerserkReset->Undo();
+    if (skipRangeBerserkReset)
+        skipRangeBerserkReset->Undo();
     _PI->WriteHiHook(0x4419D0, SPLICE_, EXTENDED_, THISCALL_, BattleStack_PrepareMelee);
     _PI->WriteHiHook(0x43FE80, SPLICE_, EXTENDED_, THISCALL_, BattleStack_PrepareShoot);
 

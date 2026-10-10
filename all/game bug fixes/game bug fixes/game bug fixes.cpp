@@ -21,6 +21,7 @@ char* BATTLE_DLG_NAME = "battle_dlg.daemon.plugin";
 #include "src\Spells.cpp"
 #include "src\SammonCreatures.cpp"
 #include "src\GameLogic.cpp"
+#include "src\AudioFixes.cpp"
 #include "src\GamePatches.cpp"
 #include "src\CrExpoFixes.cpp"
 #include "src\ScoutingRadiusFixes.cpp"
@@ -28,7 +29,6 @@ char* BATTLE_DLG_NAME = "battle_dlg.daemon.plugin";
 #include "src\AIFixes.cpp"
 #include "src\LuckFixes.cpp"
 #include "src\MapSizeFixes.cpp"
-// #include "src\CombatFixes.cpp"
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -43,7 +43,8 @@ void HooksInit(Patcher* _P, PatcherInstance* _PI)
     Graphics(_PI);
     Spells(_PI);
     WOG_SammonCreatures(_PI);
-    GameLogic(_PI); 
+    GameLogic(_PI);
+    BattleAudio::Install(_PI);
     SetPathes(_PI);
     CrExpo::CrExpoFixes(_PI);
     scouting::ScoutingRadiusFixes(_PI);
@@ -51,7 +52,6 @@ void HooksInit(Patcher* _P, PatcherInstance* _PI)
     AI::AIFixes(_PI);
     luck::LuckFixes(_PI);
     MapSize::MapSizeFixes(_PI);
-    // CombatFixes(_PI);
 
 }
 

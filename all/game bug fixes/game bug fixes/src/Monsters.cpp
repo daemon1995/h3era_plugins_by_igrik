@@ -364,21 +364,6 @@ _LHF_(gem_EnchantersTryToCastSelectSpell)
     return EXEC_DEFAULT;
 }
 
-// © JackSlater
-// Фикс бага SoD - Сказочные драконы колдовали без звука
-_LHF_(js_BattleStack_InitAssets_BeforeInitShootingSound)
-{
-    if (const auto *stack = reinterpret_cast<_BattleStack_ *>(c->ebx))
-    {
-        if (stack->creature_id == CID_FAERIE_DRAGON)
-        {
-            c->return_address = 0x043D910;
-            return NO_EXEC_DEFAULT;
-        }
-    }
-    return EXEC_DEFAULT;
-}
-
 // © Archer30
 // Rebalance Hill Forts - the cost of upgrade is calculated based on the level of the upgraded monster instead of the
 // pre-upgraded monster
@@ -607,10 +592,6 @@ void Monsters(PatcherInstance *_PI)
     // Чародеи теперь учитывают все отряды, а не только первый с каждой стороны
     _PI->WriteLoHook(0x0447D9C, gem_EnchantersFindTargetsForSpell);
     _PI->WriteLoHook(0x0447E4A, gem_EnchantersTryToCastSelectSpell);
-
-    // © JackSlater
-    // Фикс бага SoD - Сказочные драконы колдовали без звука
-    _PI->WriteLoHook(0x043D8DE, js_BattleStack_InitAssets_BeforeInitShootingSound);
 
     // Исправления недочёта SoD с отобржением атаки с бонусами стека.
     _PI->WriteCodePatch(0x5F37EA, "%n", 11); // 11 nop
