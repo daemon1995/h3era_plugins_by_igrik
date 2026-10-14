@@ -273,6 +273,16 @@ static bool NPC_OnLeftClick(_CustomDlg_* dlg, _DlgNPC_* dlgNPC, int itemId)
     return false;
 }
 
+static void NPC_SelectNextSkill(_CustomDlg_* dlg, _DlgNPC_* dlgNPC, int itemId)
+{
+    const int lastId = dlgNPC->DlgLeft;
+    const int thisId = itemId - 66;
+    ((_DlgStaticDef_*)dlg->GetItem(66 + lastId))->def_frame_index = (int)dlgNPC->Next[lastId - 1];
+    ((_DlgStaticDef_*)dlg->GetItem(itemId))->def_frame_index = (int)dlgNPC->NextActive[thisId - 1];
+    dlgNPC->DlgLeft = thisId;
+    dlg->Redraw(TRUE, 67, 72);
+}
+
 static bool NPC_OnLeftButtonDown(_CustomDlg_* dlg, _DlgNPC_* dlgNPC, int itemId)
 {
     switch (itemId)
@@ -285,10 +295,7 @@ static bool NPC_OnLeftButtonDown(_CustomDlg_* dlg, _DlgNPC_* dlgNPC, int itemId)
             const int thisId = itemId - 66;
             if (lastId == thisId && o_GetTime() - time_click < 300)
                 return true;
-            ((_DlgStaticDef_*)dlg->GetItem(66 + lastId))->def_frame_index = (int)dlgNPC->Next[lastId - 1];
-            ((_DlgStaticDef_*)dlg->GetItem(itemId))->def_frame_index = (int)dlgNPC->NextActive[thisId - 1];
-            dlg->GetItem(itemId)->RedrawScreen();
-            dlgNPC->DlgLeft = thisId;
+            NPC_SelectNextSkill(dlg, dlgNPC, itemId);
             time_click = o_GetTime();
             break;
         }
@@ -320,6 +327,17 @@ int __stdcall Y_New_CommanderDlg_Proc(_CustomDlg_* dlg, _EventMsg_* msg)
 
     switch (msg->type)
     {
+        case MT_KEYDOWN:
+            if (dlgNPC->Request == 2 && msg->subtype >= HK_1 && msg->subtype <= HK_6)
+            {
+                const int itemId = 67 + msg->subtype - HK_1;
+                if (dlg->GetItem(itemId))
+                {
+                    NPC_SelectNextSkill(dlg, dlgNPC, itemId);
+                    time_click = 0;
+                }
+            }
+            break;
         case MT_MOUSEOVER:
         {
             _DlgItem_* item = dlg->FindItem(msg->x_abs, msg->y_abs);
