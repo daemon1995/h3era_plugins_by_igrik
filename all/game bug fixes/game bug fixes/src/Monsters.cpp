@@ -7,7 +7,7 @@ int __stdcall setActStack(LoHook *h, HookContext *c)
 
     // если выстрелов у катапульты или балисты больше нет
     // то делаем пропуски передачи хода этим машинам
-    if (mon->creature_id == 145 || mon->creature_id == 146)
+    if (CALL_1(_bool8_, __fastcall, 0x47AAB0, mon->creature_id)) // isWarMachine
     {
         if (mon->creature.shots < 1)
         {
