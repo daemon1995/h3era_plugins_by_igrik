@@ -91,7 +91,7 @@ _LHF_(H3DwellingDlg_ShowRMC)
 }
 void __stdcall WndMgr__ShowRightClickDlg(HiHook *hook, DWORD wnd, _Dlg_ *dlg)
 {
-    if (dlg->v_table[0] == 0x05F3EC0 || dlg->v_table[0] == 0x0551AB0)
+    if (dlg && (dlg->v_table[0] == 0x05F3EC0 || dlg->v_table[0] == 0x0551AB0))
         rightClickDlgProc->Apply();
 
     CALL_2(void, __thiscall, hook->GetDefaultFunc(), wnd, dlg);
