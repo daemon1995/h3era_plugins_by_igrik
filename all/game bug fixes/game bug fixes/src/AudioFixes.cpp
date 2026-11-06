@@ -41,6 +41,7 @@ static LONG resultGeneration = 0; // Protected by SoundMgr + C0.
 static LONG restoreGeneration = 0;
 static char resultTrack[260] = {};
 static char previousTrack[260] = {};
+static char combatTrack[260] = {};
 static int previousTrackMode = 0;
 static bool battleActive = false;
 static bool restorePreviousTrack = false;
@@ -417,6 +418,7 @@ static int __stdcall StartBattle(HiHook *h, _BattleMgr_ *mgr, int zOrder)
         LeaveCriticalSection(Section(snd, 0xC0));
         battleActive = true;
         restorePreviousTrack = false;
+        combatTrack[0] = '\0';
     }
     StopAdventureSounds(); // Clear loop bookkeeping before the native WAV starts.
     CancelResult();        // Also covers replay implementations that skip dialog return.
@@ -431,14 +433,41 @@ static int __stdcall FinishBattle(HiHook *h, _BattleMgr_ *mgr)
     battleActive = false;
     SetCombatTransitions(false);
     _SoundMgr_ *snd = o_SoundMgr;
-    EnterCriticalSection(Section(snd, 0xC0));
-    const bool restore = restorePreviousTrack && previousTrack[0] && !PendingTrack()[0] && !CurrentTrack()[0] &&
-                         restoreGeneration == InterlockedCompareExchange(&musicGeneration, 0, 0);
-    restorePreviousTrack = false;
-    LeaveCriticalSection(Section(snd, 0xC0));
+    bool stoppedCombatTrack = false;
+    bool restore = false;
+    if (snd && !ByteAt(0x00699658))
+    {
+        // A focus change can leave the combat MP3 selected when the native
+        // battle teardown skips its normal adventure-music transition. Stop
+        // only that track; if another track is already pending, let it win.
+        EnterCriticalSection(Section(snd, 0xA8));
+        EnterCriticalSection(Section(snd, 0x90));
+        EnterCriticalSection(Section(snd, 0xC0));
+        const bool pendingCombat = combatTrack[0] && !strcmp(PendingTrack(), combatTrack);
+        const bool currentCombat = combatTrack[0] && !strcmp(CurrentTrack(), combatTrack);
+        if (pendingCombat || (currentCombat && !PendingTrack()[0]))
+        {
+            InterlockedIncrement(&musicGeneration);
+            CALL_1(void, __thiscall, 0x0059B380, snd);
+            PendingTrack()[0] = '\0';
+            CurrentTrack()[0] = '\0';
+            resultGeneration = 0;
+            stoppedCombatTrack = true;
+        }
+        const LONG generation = InterlockedCompareExchange(&musicGeneration, 0, 0);
+        restore = previousTrack[0] && !PendingTrack()[0] && !CurrentTrack()[0] &&
+                  (stoppedCombatTrack || (restorePreviousTrack && restoreGeneration == generation));
+        restorePreviousTrack = false;
+        LeaveCriticalSection(Section(snd, 0xC0));
+        LeaveCriticalSection(Section(snd, 0x90));
+        LeaveCriticalSection(Section(snd, 0xA8));
+    }
+    else
+        restorePreviousTrack = false;
     if (restore)
         CALL_4(void, __thiscall, 0x0059AFB0, snd, previousTrack, previousTrackMode, 0);
     previousTrack[0] = '\0';
+    combatTrack[0] = '\0';
     return result;
 }
 static void __stdcall StartCombatMusic(HiHook *h, _SoundMgr_ *snd, char *name, int positionMode, int /*stopSamples*/)
@@ -462,6 +491,8 @@ static void __stdcall StartCombatMusic(HiHook *h, _SoundMgr_ *snd, char *name, i
     combatMusic.snd = snd;
     combatMusic.positionMode = positionMode;
     CopyTrack(combatMusic.track, name); // The caller's name is a stack buffer.
+    if (battleActive)
+        CopyTrack(combatTrack, name);
     PumpCombatMusic();                  // No artificial delay if WAV playback is already over.
     if (combatMusic.hook)
     {
@@ -523,6 +554,7 @@ _ERH_(OnLeave)
     battleActive = false;
     restorePreviousTrack = false;
     previousTrack[0] = '\0';
+    combatTrack[0] = '\0';
     SetCombatTransitions(false);
 }
 
