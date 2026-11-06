@@ -153,30 +153,26 @@ _byte_ __stdcall AIMgr_Stack_SetHexes_WayToMoveLength(HiHook *hook, _dword_ this
 // фикс: двуклеточные монстры в бою могут сделать 1 шаг назад
 _LHF_(Y_FixBattle_StackStepBack)
 {
-    _BattleStack_ *stack = (_BattleStack_ *)c->edi;
-    _int_ target_pos = *(int *)(c->ebp + 8);
+    // At 0x476020 the native POP EDI / POP ESI have already run.
+    // EAX still holds the active stack from the self-hover comparison.
+    // Replace only MOV EAX, 5; leave the complete native epilogue intact.
+    _BattleStack_ *stack = (_BattleStack_ *)c->eax;
+    const int targetHex = *(int *)(c->ebp + 8);
+    const int flags = stack->creature.flags;
+    c->eax = 5;
 
-    c->eax = 5; // стандартный курсор
+    if ((flags & (BCF_2HEX_WIDE | BCF_CANT_MOVE)) != BCF_2HEX_WIDE ||
+        targetHex != stack->hex_ix || stack->active_spell_duration[SPL_BIND] || stack->GetSpeed() <= 0)
+        return NO_EXEC_DEFAULT;
 
-    if (stack->creature.flags & BCF_2HEX_WIDE && target_pos != stack->GetSecondGexID())
-    {
-        _int_ backGexID = target_pos + 1 - 2 * stack->orientation;
-        if (backGexID % 17 > 0 && backGexID % 17 < 16)
-        {
-            if (stack->creature.flags & BCF_CAN_FLY)
-            {
-                c->eax = 2;
-            }
-            else
-            {
-                c->eax = 1;
-            }
-        }
-    }
-    c->Pop(); // pop edi
-    c->Pop(); // pop esi
+    // The native move needs one more free cell opposite the current rear hex.
+    const int backHex = targetHex + (stack->orientation ? -1 : 1);
+    const int column = backHex % 17;
+    if (backHex >= 0 && backHex < 187 && column > 0 && column < 16 &&
+        !o_BattleMgr->IsGexNotFree(backHex))
+        c->eax = (flags & BCF_CAN_FLY) ? 2 : 1;
 
-    return EXEC_DEFAULT;
+    return NO_EXEC_DEFAULT;
 }
 
 bool __cdecl WoG_OnMapRestartCrtraitsReset(const BOOL isWogMap)
@@ -996,20 +992,11 @@ void __stdcall OnAfterAttackDrawActionPlay(HiHook *h, _BattleMgr_ *mgr, const in
     }
 }
 
-// © daemon_n
-// отключаем автокаст заклинаний в бстрой и автобитве, если в настройках игрока стоит "не кастовать за ИИ"
-_LHF_(BattleMgr_TryToCastAutoSpell)
+_LHF_(AdvManager_KeyPress)
 {
-    if (!IntAt(0x06987E8) && !o_AutoSolo) // проверка опции и gosolo
-    {
-        c->return_address = 0x04230BC;
-        return NO_EXEC_DEFAULT;
-    }
-
+    CALL_2(void, __thiscall, 0x47F0F0, o_AdvMgr, 1);// H3AdventureManager::StopCursor
     return EXEC_DEFAULT;
 }
-
-
 // ##############################################################################################################################
 // ##############################################################################################################################
 // ##############################################################################################################################
@@ -1018,7 +1005,7 @@ void GameLogic(PatcherInstance *_PI)
 {
 
     // фикс: двуклеточные монстры в бою могут сделать 1 шаг назад
-    _PI->WriteCodePatch(0x47601E, "%n", 7); // 7 nops
+    // Hook only MOV EAX, 5; keep the native POP EDI / POP ESI.
     _PI->WriteLoHook(0x476020, Y_FixBattle_StackStepBack);
 
     // фикс: атакующий летающий стек НЕ пропускает ход при атаке заблоченного со всех сторон целевого стека
@@ -1319,7 +1306,11 @@ void GameLogic(PatcherInstance *_PI)
     // _PI->WriteJmp(0x43FE10, 0x43FAD9); // lich shooting IMPLEMENT LATER W/ LoHook- It has some referes to the
     // replaceable address;
 
-    // © daemon_n
-    // отключаем автокаст заклинаний в бстрой и автобитве, если в настройках игрока стоит "не кастовать за ИИ"
-    _PI->WriteLoHook(0x0422FC2, BattleMgr_TryToCastAutoSpell);
+
+
+    _PI->WriteCodePatch(0x408ff7, "%n", 9);
+
+    _PI->WriteLoHook(0x408ff2, AdvManager_KeyPress);
+
+
 }
