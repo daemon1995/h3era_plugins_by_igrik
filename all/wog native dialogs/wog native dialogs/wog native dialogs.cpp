@@ -104,7 +104,6 @@ char* textProcS = "%s";
 #include "src\WoGOptions.cpp"
 #include "src\WoGOptionsStrings.cpp"
 #include "src\CastleReBuild.cpp"
-#include "src\HD5_Functions.cpp"
 #include "src\BattleLogDlg.cpp"
 
 #include "src\WoGOptionsSaveOrLoad.cpp"
@@ -113,8 +112,10 @@ char* textProcS = "%s";
 #include "src\TownHeroesMeet.cpp"
 #include "src\Battle_ShowKilled.cpp"
 #include "src\ViewWorldSpells.cpp"
-#include "src\NativeDlgsImprovements.cpp"
 #endif DOP_FUNK_TO_ERA
+
+// Shared frame helpers are also used by the commander dialog in plain WND builds.
+#include "src\NativeDlgsImprovements.cpp"
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -247,10 +248,6 @@ BOOL APIENTRY DllMain( HMODULE hModule,
             ERA_VERSION = Era::GetVersionNum();
             Era::RegisterHandler(OnReportVersion, "OnReportVersion");
 
-            // // загружаем HD данные
-            // _HD = _P->GetInstance("HD.WoG"); 
-            // if (_HD) { isHD = true; }
-
             // создаем загрузку необходимых тектовиков
             _PI->WriteLoHook(0x4EDD65, Y_LoadAllTXTinGames);
 
@@ -292,7 +289,6 @@ BOOL APIENTRY DllMain( HMODULE hModule,
             Dlg_IFG(_PI);       // диалог IF:G
             Dlg_ChooseAttack(_PI);  // диалог выбора типа атаки монстром
             Dlg_CastleReBuild(_PI); // диалог перестройки замка
-            HD5_Functions(_PI);     // реализация функций, вырезанных в HD 5 версии
             DlgBattleLog(_PI);  // окно диалога статуса действий и событий в битве
 
             // char* oVersionERA = "{Game Version:}\n\nHoMM3 ERA 2.7.7 \n (with Wog Native Dialogs)";

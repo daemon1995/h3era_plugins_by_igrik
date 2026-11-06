@@ -163,6 +163,34 @@ int __stdcall Y_WoGDlg_ChooseArt(HiHook* hook, int a1, _Hero_* hero, int Remove)
     return ret;
 }
 
+void WoG_DropObject_UpdateRoute()
+{
+    // Invalidate the cached movement area before rebuilding the hero's route.
+    o_AdvMgr->seedingValid = 0;
+    o_AdvMgr->fullySeeded = 0;
+    CALL_4(void, __thiscall, 0x418D30, o_AdvMgr, TRUE, TRUE, TRUE);
+    o_AdvMgr->lastHoverX = -1;
+    CALL_1(void, __thiscall, 0x4ECCD0, o_InputMgr);
+}
+
+int __stdcall WoG_DropArt_UpdateRoute(LoHook* h, HookContext* c)
+{
+    // Both artifact and scroll placement have finished here; -1 means cancel.
+    if (*(int*)(c->ebp - 0x20) != -1) {
+        WoG_DropObject_UpdateRoute();
+    }
+
+    return EXEC_DEFAULT;
+}
+
+int __stdcall WoG_PlaceCreature_UpdateRoute(LoHook* h, HookContext* c)
+{
+    // The monster is placed and the selected troops are removed from the hero.
+    // Cancel and empty-selection branches do not reach this point.
+    WoG_DropObject_UpdateRoute();
+    return EXEC_DEFAULT;
+}
+
 // делаем диалог сброса и оставление монстров по CRTL+ПКМ 
 int __stdcall WoG_PlaceCreature_RMC_Crtl(LoHook* h, HookContext* c)
 {
@@ -183,6 +211,9 @@ void Dlg_DropArt(PatcherInstance* _PI)
 {
     // диалог сброса артефактов на землю
     _PI->WriteHiHook(0x7548BC, SPLICE_, EXTENDED_, THISCALL_, Y_WoGDlg_ChooseArt);
+
+    _PI->WriteLoHook(0x757426, WoG_DropArt_UpdateRoute);
+    _PI->WriteLoHook(0x75758E, WoG_PlaceCreature_UpdateRoute);
 
     // делаем диалог сброса и оставление монстров по CRTL+ПКМ    
     _PI->WriteLoHook(0x7570EB, WoG_PlaceCreature_RMC_Crtl); 

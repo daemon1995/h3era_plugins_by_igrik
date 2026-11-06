@@ -41,13 +41,13 @@ int __stdcall Y_DlgTown_Proc(HiHook *hook, _TownMgr_ *tm, _EventMsg_ *msg)
 
             o_TownMgr->mgr.isActive = false;
             blockScreenUpdate->Apply();
-            hdv(_bool_, "HotA.SwapMgrCalledFromTown") = 1;
+            _P->VarValue<_bool_>("HotA.SwapMgrCalledFromTown") = 1;
 
             // вызываем обмен героями
             heroU->TeachScholar(heroD);
             o_AdvMgr->SwapHeroes(heroU, heroD);
 
-            hdv(_bool_, "HotA.SwapMgrCalledFromTown") = 0;
+            _P->VarValue<_bool_>("HotA.SwapMgrCalledFromTown") = 0;
             blockScreenUpdate->Undo();
 
             if (switchButton)

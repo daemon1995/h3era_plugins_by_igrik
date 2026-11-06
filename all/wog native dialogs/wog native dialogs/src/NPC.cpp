@@ -1,3 +1,4 @@
+#include "NativeDlgsImprovements.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////// Диалог командира /////////////// /////////////////////////////////////////////////
 
@@ -12,6 +13,112 @@ char* npc3Def = "Dlg_NPC3.def";
 struct _DlgNPC_;
 #define o_dlgNPC ((_DlgNPC_*)0x28604D8)
 #define WoG_NoNPC (*(_int_*)0x277192C)
+
+namespace NpcAutoSkip
+{
+    enum { BUTTON_ID = 222, MAX_LEVEL = 74, FRAME_HEIGHT = 36 };
+
+    struct Series
+    {
+        _Npc_* npc;
+        _CustomDlg_* dialog;
+        bool eligible;
+        bool active;
+    };
+
+    Series* current = NULL;
+
+    void __stdcall CheckLevelUps(HiHook* hook, _Npc_* npc, int heroExperience, int forceAI)
+    {
+        Series series = {npc, NULL, false, false};
+        Series* previous = current;
+        current = &series;
+        CALL_3(void, __thiscall, hook->GetDefaultFunc(), npc, heroExperience, forceAI);
+        current = previous;
+    }
+
+    int __stdcall TargetExperienceCalculated(LoHook*, HookContext* c)
+    {
+        // 0x7696AB: EAX contains the final experience, including the Paladin bonus.
+        _Npc_* npc = *(_Npc_**)(c->ebp - 0x48);
+        if (current && current->npc == npc)
+        {
+            // Query the game's thresholds on a copy, before the first level increment.
+            _Npc_ preview = *npc;
+            int pending = 0;
+            while (preview.now_level < MAX_LEVEL &&
+                (int)c->eax >= CALL_1(int, __thiscall, 0x769260, &preview))
+            {
+                ++preview.now_level;
+                ++pending;
+            }
+            current->eligible = pending > 3;
+        }
+        return EXEC_DEFAULT;
+    }
+
+    int __stdcall ApplyAIChoice(LoHook*, HookContext* c)
+    {
+        // 0x769911: the dialog and native offer cleanup have finished. Rejoin the
+        // original AI branch, which initializes its locals and applies one skill.
+        // Returning 9999 here would index outside the commander's offer table.
+        if (current && current->active && current->npc == *(_Npc_**)(c->ebp - 0x48))
+        {
+            c->return_address = 0x769769;
+            return NO_EXEC_DEFAULT;
+        }
+        return EXEC_DEFAULT;
+    }
+
+    bool IsCurrentDialog(_CustomDlg_* dlg)
+    {
+        return dlg && current && current->eligible && current->dialog == dlg;
+    }
+
+    int Close(_CustomDlg_* dlg, _EventMsg_* msg)
+    {
+        o_dlgNPC->DlgLeft = 0;
+        return dlg->Close(msg);
+    }
+
+    int __fastcall ButtonCallback(_EventMsg_* msg)
+    {
+        if (!msg || msg->item_id != BUTTON_ID || !IsCurrentDialog((_CustomDlg_*)msg->flags_2))
+            return 0;
+        if (msg->type == MT_MOUSEBUTTON && msg->subtype == MST_RBUTTONDOWN)
+        {
+            b_MsgBox(NativeDlg::AutoSkipHint(), MBX_RMC);
+            return 1;
+        }
+        if (msg->type == MT_MOUSEBUTTON && msg->subtype == MST_LBUTTONCLICK)
+        {
+            current->active = true;
+            return Close(current->dialog, msg);
+        }
+        return 0;
+    }
+
+    void AddButton(_CustomDlg_* dlg, _Npc_* npc, _DlgNPC_* dlgNPC, NativeDlg::ButtonFrame& frame)
+    {
+        if (!dlgNPC->Request || !current || current->npc != npc || !current->eligible)
+            return;
+        // An active series must still close its next window if drawing the
+        // optional button fails (for example, an exhausted PCX allocation).
+        if (current->active)
+            current->dialog = dlg;
+        const int x = 285 - 64 - 8;
+        const int y = dlg->height - 76;
+        if (!frame.Create(dlg, x, y, FRAME_HEIGHT -2))
+            return;
+        _DlgCallbackButton_* button = _DlgCallbackButton_::Create(x, y, 64, 30, BUTTON_ID,
+            "iOKAL.def", (_ptr_)ButtonCallback, 0, 1);
+        if (button)
+        {
+            dlg->AddItem(button);
+            current->dialog = dlg;
+        }
+    }
+}
 
 namespace NpcSkillsScrolling
 {
@@ -197,6 +304,10 @@ static char* NPC_GetHint(_DlgNPC_* dlgNPC, int itemId)
             text = dlgNPC->Request ? json_Npc[2] : json_Npc[1];
             break; // подсказка Ok
 
+        case NpcAutoSkip::BUTTON_ID:
+            text = NativeDlg::AutoSkipHint();
+            break;
+
         default:
             text = o_NullString;    break;
     }
@@ -321,6 +432,20 @@ static bool NPC_OnLeftButtonDown(_CustomDlg_* dlg, _DlgNPC_* dlgNPC, int itemId)
 
 int __stdcall Y_New_CommanderDlg_Proc(_CustomDlg_* dlg, _EventMsg_* msg)
 {
+    if (NpcAutoSkip::IsCurrentDialog(dlg))
+    {
+        // Run has already drawn the next window. Keep this proc to close it.
+        if (NpcAutoSkip::current->active)
+            return NpcAutoSkip::Close(dlg, msg);
+        if (NativeDlg::IsCtrlConfirm(msg, DIID_OK))
+        {
+            msg->type = MT_MOUSEBUTTON;
+            msg->subtype = MST_LBUTTONCLICK;
+            msg->item_id = NpcAutoSkip::BUTTON_ID;
+            msg->flags_2 = (_dword_)dlg;
+            return NpcAutoSkip::ButtonCallback(msg);
+        }
+    }
     // DefProc also converts button hotkeys into the usual mouse-button events.
     const int r = dlg->DefProc(msg);
     _DlgNPC_* dlgNPC = o_dlgNPC;
@@ -471,7 +596,12 @@ _int_ __cdecl Y_Dlg_NPC_Show(HiHook* hook, _DlgNPC_* dlgNPC)
     // и сразу делаем выход и на ESC и ENTER
     bttnOK->AddHotKey(HK_ESC);
     bttnOK->AddHotKey(HK_ENTER);
+    if (dlgNPC->Request)
+        bttnOK->AddHotKey(HK_SPACE);
     dlg->AddItem(bttnOK);
+
+    NativeDlg::ButtonFrame autoSkipFrame;
+    NpcAutoSkip::AddButton(dlg, npc, dlgNPC, autoSkipFrame);
 
     // (id = 3) кнопка уволить командира
     dlg->AddItem(_DlgButton_::Create(564, dlg->height -76, 51, 35, 3, "Dlg_NPCdel.def", 0, 1, 0, 83, 2));
@@ -628,6 +758,9 @@ _int_ __cdecl Y_Dlg_NPC_Show(HiHook* hook, _DlgNPC_* dlgNPC)
     }
 
     dlg->Run();
+    if (NpcAutoSkip::IsCurrentDialog(dlg))
+        NpcAutoSkip::current->dialog = NULL;
+    autoSkipFrame.Release();
     dlg->Destroy(TRUE);
 
     return dlgNPC->DlgLeft;
@@ -791,6 +924,10 @@ int __stdcall Y_HeroDlg_Proc(HiHook* hook, _CustomDlg_* dlg, _EventMsg_* msg)
 
 void Dlg_NPC(PatcherInstance* _PI)
 {
+    _PI->WriteHiHook(0x769651, SPLICE_, EXTENDED_, THISCALL_, NpcAutoSkip::CheckLevelUps);
+    _PI->WriteLoHook(0x7696AB, NpcAutoSkip::TargetExperienceCalculated);
+    _PI->WriteLoHook(0x769911, NpcAutoSkip::ApplyAIChoice);
+
     // диалог командира
     _PI->WriteHiHook(0x7736E8, SPLICE_, EXTENDED_, CDECL_, Y_Dlg_NPC_Show);
     _PI->WriteHiHook(0x76A46E, SPLICE_, EXTENDED_, THISCALL_, Y_Dlg_NPC_Prepare);
