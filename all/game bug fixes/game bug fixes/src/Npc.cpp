@@ -200,17 +200,6 @@ _LHF_(WoG_CombatStart_SummonNPC)
     return EXEC_DEFAULT;
 }
 
-_ERH_(OnAfterCreateWindow)
-{
-    // @ daemon_n
-    // фикс WoG бага, когда командиры призывают боевые машины в банках существ
-    constexpr LPCSTR fixKey = "gbfe.disable_fix.npc.creature_banks_war_machines";
-    if (atoi(Era::tr(fixKey)) == 0)
-    {
-        _PI->WriteLoHook(0x76B889, WoG_CombatStart_SummonNPC); // tent
-        _PI->WriteLoHook(0x76B97B, WoG_CombatStart_SummonNPC); // ballista
-    }
-}
 
 // @daemon_n
 // отключаем командира инферно, забирающего армию не у нейтральных армий
@@ -323,7 +312,15 @@ void Npc(PatcherInstance *_PI)
                                  //[eax+edx*4+38h], 2 / jg      short loc_7695E3]
     _PI->WriteLoHook(0x076949E, NPC_CalculatePrimarySkills);
 
-    Era::RegisterHandler(OnAfterCreateWindow, "OnAfterCreateWindow");
+    // @ daemon_n
+    // фикс WoG бага, когда командиры призывают боевые машины в банках существ
+
+    constexpr LPCSTR fixKey = "gbfe.disable_fix.npc.creature_banks_war_machines";
+    if (atoi(Era::tr(fixKey)) == 0)
+    {
+        _PI->WriteLoHook(0x76B889, WoG_CombatStart_SummonNPC); // tent
+        _PI->WriteLoHook(0x76B97B, WoG_CombatStart_SummonNPC); // ballista
+    }
 
     // @daemon_n
     // фикс: сообщение о посещении кристалов командиров показываются до их удаления с карты
