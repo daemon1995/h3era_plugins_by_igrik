@@ -1,6 +1,9 @@
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////// ИСПРАВЛЕНИЕ БАГОВ HD MOD /////////////////////////////////////////
 #include <algorithm>
+// Координаты боя в HD.
+_int_ HD_Battle_X = 0;
+_int_ HD_Battle_Y = 0;
 
 namespace HdMod
 {
@@ -16,11 +19,31 @@ void __stdcall RandomMap_WriteHeader_AssignName(HiHook *h, _HStr_ *this_, LPCSTR
 
     this_->Set((char *)str.c_str());
 }
+// исправление положения подсказки в окне города из-за смещения хинтбара hd-mod
+_LHF_(WoG_TownManager_SetCustomHint)
+{
+    // Исправляем баг SoD с пропаданием выбора игрока при показе списка карт.
+
+    if (auto *hintBar = o_TownMgr->dlg->GetItem(151))
+    {
+        const int yRedrawPos = hintBar->y + hintBar->parent->y;
+        IntAt(0x071286C + 1) = yRedrawPos;
+        h->Undo();
+    }
+    return EXEC_DEFAULT;
+}
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void HdModFixes(Patcher *_P, PatcherInstance *_PI)
 {
+
+    // Получение координат поля боя.
+    HD_Battle_X = _P->VarGetValue<_int32_>("HD.Battle.X", 0);
+    HD_Battle_Y = _P->VarGetValue<_int32_>("HD.Battle.Y", 0);
+
+
+
     // исправление поломки имени случайной карты при генерации со включённым тывиком "HD.Misc.RenameRandMap" в
     // настройках HD Mod
     const int renameRandMap = _P->VarGetValue<bool>("HD.Misc.RenameRandMap", FALSE);
@@ -41,6 +64,11 @@ void HdModFixes(Patcher *_P, PatcherInstance *_PI)
 
         _PI->WriteHiHook(0x54A264, CALL_, EXTENDED_, THISCALL_, HiHook_Test3);
         */
+    }
+    // исправление положения подсказки в окне города из-за смещения хинтбара hd-mod
+    if (o_HD_Y > 600)
+    {
+        _PI->WriteLoHook(0x071285E, WoG_TownManager_SetCustomHint);
     }
 }
 } // namespace HdMod

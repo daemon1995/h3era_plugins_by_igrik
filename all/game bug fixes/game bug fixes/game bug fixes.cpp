@@ -29,11 +29,16 @@ char* BATTLE_DLG_NAME = "battle_dlg.daemon.plugin";
 #include "src\AIFixes.cpp"
 #include "src\LuckFixes.cpp"
 #include "src\MapSizeFixes.cpp"
+#include "src\HdModFixes.cpp"
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
+_LHF_(HooksInit)
+{
+    HdMod::HdModFixes(_P, _PI);
+	return EXEC_DEFAULT;
+}
 void HooksInit(Patcher* _P, PatcherInstance* _PI)
 {
     RK(_P, _PI);
@@ -52,6 +57,10 @@ void HooksInit(Patcher* _P, PatcherInstance* _PI)
     AI::AIFixes(_PI);
     luck::LuckFixes(_PI);
     MapSize::MapSizeFixes(_PI);
+
+    _PI->WriteLoHook(0x4EEAF2, HooksInit);
+
+
 
 }
 
