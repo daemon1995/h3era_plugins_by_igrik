@@ -4,22 +4,22 @@
 int __stdcall setActStack(LoHook *h, HookContext *c)
 {
     _BattleStack_ *mon = (_BattleStack_ *)(int)(c->esi - 656);
-
+    auto &info = mon->creature;
     // если выстрелов у катапульты или балисты больше нет
     // то делаем пропуски передачи хода этим машинам
     if (CALL_1(_bool8_, __fastcall, 0x47AAB0, mon->creature_id)) // isWarMachine
     {
-        if (mon->creature.shots < 1)
+        if (info.shooter && info.shots < 1)
         {
             c->return_address = 0x464DAD;
             return NO_EXEC_DEFAULT;
         }
     }
     // если выстрелов у атакующих стену больше нет
-    else if (mon->creature.destroyWalls && mon->creature.shots < 1)
+    else if (info.destroyWalls && info.shots < 1)
     {
         // то забираем флаг "катапульта"
-        mon->creature.destroyWalls = false;
+        info.destroyWalls = false;
     }
     return EXEC_DEFAULT;
 }
