@@ -3,7 +3,7 @@
 
 int __stdcall setActStack(LoHook *h, HookContext *c)
 {
-    _BattleStack_ *mon = (_BattleStack_ *)(int)(c->esi - 656);
+    _BattleStack_ *mon = reinterpret_cast<_BattleStack_ *>(c->esi - 656);
     auto &info = mon->creature;
     // если выстрелов у катапульты или балисты больше нет
     // то делаем пропуски передачи хода этим машинам
